@@ -66,6 +66,70 @@ function getHtmlTextContain(_ele, _text) {
     );
 }
 
+function regExContains(selector, text) {
+    var elements = document.querySelectorAll(selector);
+    return Array.prototype.filter.call(elements, function (element) {
+        return RegExp(text).test(element.textContent);
+    });
+}
+
+function trustedClick(element) {
+    if (!element) return;
+
+    const events = ['mousedown', 'mouseup', 'click'];
+    events.forEach(type => {
+        const event = new MouseEvent(type, {
+            view: window,
+            bubbles: true,
+            cancelable: true,
+            buttons: 1
+        });
+        element.dispatchEvent(event);
+    });
+}
+
+function setReactInputValue(input, value) {
+    if (!input) return false;
+
+    // 1. Focus and select
+    input.focus();
+    input.select();
+
+    // 2. Set value
+    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        "value"
+    ).set;
+
+    nativeInputValueSetter.call(input, value);
+
+    // 3. Dispatch full event chain
+    const events = [
+        'input',
+        'change',
+        'keydown',
+        'keyup',
+        'blur'
+    ];
+
+    events.forEach(type => {
+        const event = new Event(type, { bubbles: true });
+        if (type === 'keydown' || type === 'keyup') {
+            Object.defineProperty(event, 'key', { value: 'Enter' });
+        }
+        input.dispatchEvent(event);
+    });
+
+    // 4. Trigger React's internal update
+    const reactProps = Object.keys(input).find(key => key.startsWith('__reactProps'));
+    if (reactProps && input[reactProps]?.onChange) {
+        input[reactProps].onChange({ target: input });
+    }
+
+    console.log(`[Input] Set to ${value}`);
+    return true;
+}
+
 const priceSelector =
     "#root > div.flex-1.flex.flex-col > div.min-h-\\[calc\\(100vh-98px\\)\\].flex.flex-col.bg-fill-page-primary > div > div.flex-1.flex.flex-col.gap-\\[3px\\].bg-fill-page-tertiary.min-w-0 > div.flex.gap-\\[3px\\].relative.min-w-0 > div.flex.flex-col.gap-\\[3px\\].flex-1.min-w-0.h-full.overflow-hidden > div.trade-card.h-\\[64px\\].flex.items-center.text-xs.px-2.gap-2.flex-shrink-0.overflow-hidden.w-full.max-w-full > div.relative.flex-1.h-full.overflow-x-auto.flex.flex-wrap.w-0 > div.flex-1.overflow-auto.no-scrollbar.flex.items-center.gap-8.h-full.tabular-nums > div.shrink-0.text-xs.\\[\\&\\>\\.view-item-value\\]\\:text-xs.whitespace-nowrap.\\[\\&\\>\\.view-item-value\\]\\:whitespace-nowrap.cursor-help > div.view-item-value.mt-1";
 const volThreshold = 0.05; // 波动率阈值（%），超过则暂停下单。BTC建议0.1-0.5，根据测试调整。
@@ -77,7 +141,7 @@ const maxDelay = 10000; // 最大随机延迟 (ms)
  * Stops the entire script if loss > threshold
  */
 let initialBalance = null;
-const lossThreshold = 50; // Max allowed loss in USDT
+const lossThreshold = 200; // Max allowed loss in USDT
 
 // ============ 模块0：价格监控 & 波动率计算 ============
 let prices = [];
@@ -119,7 +183,7 @@ let isClosingPosition = false;
 const closePositionInterval = setInterval(() => {
     try {
         const oneClickmarketCloseBtn = getHtmlTextContain("button", "全部平倉");
-        if (isClosingPosition || oneClickmarketCloseBtn.disabled) {
+        if (isClosingPosition || oneClickmarketCloseBtn.disabled || cancellingOrder) {
             return;
         }
 
@@ -175,7 +239,7 @@ function getRandomDelay() {
     return Math.floor(Math.random() * (maxDelay - minDelay)) + minDelay;
 }
 function placeOrder() {
-    if (isPlacingOrder) {
+    if (isPlacingOrder || cancellingOrder) {
         return;
     }
 
@@ -287,8 +351,36 @@ setTimeout(placeOrder, firstDelay);
 // Run every 10 seconds
 const lossCheckInterval = setInterval(checkAccountLoss, 10000);
 
+// Run every 1 minutes
+let cancellingOrder = false
+const cancelAllOrders = setInterval(function () {
+    const orderSizeEle = document.querySelector("#orderSizeValue");
+    if (orderSizeEle.value === '0' && !cancellingOrder) {
+        cancellingOrder = true;
+        const currentOrderBtn = regExContains('button', '當前委託')[0];
+
+        trustedClick(currentOrderBtn)
+        setTimeout(() => {
+            const cancelAllBtn = getHtmlTextContain('button', '全部取消');
+            trustedClick(cancelAllBtn)
+
+            setTimeout(() => {
+                const confirmButton = getHtmlTextContain("button", "確認");
+                trustedClick(confirmButton)
+
+                setTimeout(() => {
+                    trustedClick(getHtmlTextContain('button', '持倉'))
+
+                    setReactInputValue(orderSizeEle, '0.005')
+                    cancellingOrder = false
+                }, 1500)
+            }, 1000)
+        }, 500)
+    }
+}, 1000)
+
 // ============ 控制面板 ============
 console.log("🛑 停止价格监控: clearInterval(" + priceInterval + ")");
 console.log("🛑 停止平仓模块: clearInterval(" + closePositionInterval + ")");
 console.log("🛑 停止餘額模块: clearInterval(" + lossCheckInterval + ")");
-log("下单", "info", `${(firstDelay / 1000).toFixed(1)}秒 后开始首次下单...`);
+// log("下单", "info", `${(firstDelay / 1000).toFixed(1)}秒 后开始首次下单...`);
