@@ -136,6 +136,11 @@ const volThreshold = 0.05; // 波动率阈值（%），超过则暂停下单。B
 const priceHistorySize = 10; // 监控最近多少个价格点计算波动率。
 const minDelay = 3000; // 最小随机延迟 (ms)
 const maxDelay = 10000; // 最大随机延迟 (ms)
+
+// 启动下单模块（首次随机延迟后开始）
+const firstDelay = getRandomDelay();
+// Run every 10 seconds
+let cancellingOrder = false
 /**
  * Checks account balance every 10 seconds
  * Stops the entire script if loss > threshold
@@ -183,7 +188,7 @@ let isClosingPosition = false;
 const closePositionInterval = setInterval(() => {
     try {
         const oneClickmarketCloseBtn = getHtmlTextContain("button", "全部平倉");
-        if (isClosingPosition || oneClickmarketCloseBtn.disabled || cancellingOrder) {
+        if (cancellingOrder || isClosingPosition || oneClickmarketCloseBtn.disabled) {
             return;
         }
 
@@ -218,10 +223,8 @@ const closePositionInterval = setInterval(() => {
 
             // 超时保护
             setTimeout(() => {
-                if (isClosingPosition) {
-                    log("平仓", "warn", `操作超时，强制解锁`);
-                    isClosingPosition = false;
-                }
+                log("平仓", "warn", `操作超时，强制解锁`);
+                isClosingPosition = false;
             }, 5000);
         } else {
             log("平仓", "error", `找不到一鍵市价按钮`);
@@ -344,31 +347,30 @@ function checkAccountLoss() {
     }
 }
 
-// 启动下单模块（首次随机延迟后开始）
-const firstDelay = getRandomDelay();
 setTimeout(placeOrder, firstDelay);
 
 // Run every 10 seconds
 const lossCheckInterval = setInterval(checkAccountLoss, 10000);
 
-// Run every 1 minutes
-let cancellingOrder = false
 const cancelAllOrders = setInterval(function () {
     const orderSizeEle = document.querySelector("#orderSizeValue");
+    if (orderSizeEle.value !== '0.005') {
+        setReactInputValue(orderSizeEle, '0.005')
+    }
     if (orderSizeEle.value === '0' && !cancellingOrder) {
         cancellingOrder = true;
         const currentOrderBtn = regExContains('button', '當前委託')[0];
 
         trustedClick(currentOrderBtn)
-        setTimeout(() => {
+        setTimeout(function () {
             const cancelAllBtn = getHtmlTextContain('button', '全部取消');
             trustedClick(cancelAllBtn)
 
-            setTimeout(() => {
+            setTimeout(function () {
                 const confirmButton = getHtmlTextContain("button", "確認");
                 trustedClick(confirmButton)
 
-                setTimeout(() => {
+                setTimeout(function () {
                     trustedClick(getHtmlTextContain('button', '持倉'))
 
                     setReactInputValue(orderSizeEle, '0.005')
@@ -377,7 +379,7 @@ const cancelAllOrders = setInterval(function () {
             }, 1000)
         }, 500)
     }
-}, 1000)
+}, 10000)
 
 // ============ 控制面板 ============
 console.log("🛑 停止价格监控: clearInterval(" + priceInterval + ")");
